@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: ai-travel-planner
+    env: python
+    buildCommand: pip install -r codex_test/requirements.txt
+    startCommand: python codex_test/server.py
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-20b

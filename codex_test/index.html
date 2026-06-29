@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI 국내여행 플래너</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="static/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero">
+        <div class="hero-copy">
+          <span class="eyebrow">AI 국내여행 플래너</span>
+          <h1>취향과 예산에 맞춘 국내여행 일정</h1>
+        </div>
+      </section>
+
+      <section class="planner-grid">
+        <form id="plannerForm" class="form-panel">
+          <div class="section-kicker">여행 만들기</div>
+          <div class="wizard-head">
+            <div>
+              <h2 id="wizardTitle">어디로 떠날까요?</h2>
+              <p id="wizardHint">지역을 먼저 정하면 그 다음 조건을 하나씩 물어볼게요.</p>
+            </div>
+            <strong id="wizardStepText">1 / 7</strong>
+          </div>
+
+          <div class="wizard-progress" aria-hidden="true">
+            <span class="active"></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+
+          <section class="wizard-step active" data-title="어디로 떠날까요?" data-hint="지역을 먼저 정하면 그 다음 조건을 하나씩 물어볼게요.">
+            <label>
+              여행 지역
+              <input id="region" name="region" placeholder="예: 부산, 강릉, 제주" required />
+            </label>
+          </section>
+
+          <section class="wizard-step" data-title="누구와 함께 가나요?" data-hint="동행에 따라 동선 밀도와 휴식 시간을 다르게 잡습니다.">
+            <label>
+              동행
+              <select id="companion" name="companion">
+                <option>혼자</option>
+                <option selected>친구</option>
+                <option>연인</option>
+                <option>가족</option>
+              </select>
+            </label>
+          </section>
+
+          <section class="wizard-step" data-title="언제 떠날까요?" data-hint="출발일과 돌아오는 날을 누르면 여행 기간을 자동으로 계산합니다.">
+            <div class="calendar-card">
+              <input id="days" name="days" type="hidden" required />
+              <input id="startDate" name="start_date" type="hidden" />
+              <input id="endDate" name="end_date" type="hidden" />
+              <input id="tripDays" name="trip_days" type="hidden" />
+              <div class="calendar-toolbar">
+                <label>
+                  연도
+                  <select id="calendarYear" aria-label="여행 연도"></select>
+                </label>
+                <label>
+                  월
+                  <select id="calendarMonth" aria-label="여행 월"></select>
+                </label>
+              </div>
+              <div class="calendar-weekdays" aria-hidden="true">
+                <span>일</span>
+                <span>월</span>
+                <span>화</span>
+                <span>수</span>
+                <span>목</span>
+                <span>금</span>
+                <span>토</span>
+              </div>
+              <div id="calendarGrid" class="calendar-grid" tabindex="-1" aria-label="여행 날짜 선택"></div>
+              <p id="dateSummary" class="date-summary">출발일과 돌아오는 날을 선택하세요.</p>
+            </div>
+          </section>
+
+          <section class="wizard-step" data-title="예산은 어느 정도인가요?" data-hint="대략적인 예산만 적어도 이동/식비 참고치를 같이 보여줍니다.">
+            <label>
+              예산
+              <input id="budget" name="budget" placeholder="예: 50만원" required />
+            </label>
+          </section>
+
+          <section class="wizard-step" data-title="어떻게 이동할까요?" data-hint="짧은 거리는 도보, 먼 거리는 대중교통과 필요 시 택시 예상치를 계산합니다.">
+            <label>
+              이동수단
+              <select id="transport" name="transport">
+                <option selected>대중교통(필요 시 택시)</option>
+                <option>자차</option>
+                <option>도보 위주</option>
+              </select>
+            </label>
+          </section>
+
+          <section class="wizard-step" data-title="어떤 여행을 좋아하나요?" data-hint="선택하지 않아도 균형형 일정으로 만들 수 있습니다.">
+            <fieldset>
+              <legend>여행 스타일</legend>
+              <div class="checks">
+                <label><input type="checkbox" name="style" value="힐링" /> 힐링</label>
+                <label><input type="checkbox" name="style" value="맛집" /> 맛집</label>
+                <label><input type="checkbox" name="style" value="액티비티" /> 액티비티</label>
+                <label><input type="checkbox" name="style" value="자연" /> 자연</label>
+                <label><input type="checkbox" name="style" value="문화" /> 문화</label>
+                <label><input type="checkbox" name="style" value="카페" /> 카페</label>
+                <label><input type="checkbox" name="style" value="사진 명소" /> 사진 명소</label>
+                <label><input type="checkbox" name="style" value="가성비" /> 가성비</label>
+              </div>
+            </fieldset>
+          </section>
+
+          <section class="wizard-step final-step" data-title="준비 끝!" data-hint="이제 숙소 기준으로 이어지는 여행 일정을 만들어볼게요.">
+            <button type="submit" id="submitButton">여행 일정 생성!</button>
+          </section>
+
+          <div class="wizard-actions">
+            <button type="button" id="prevStep" class="step-button secondary">이전</button>
+            <button type="button" id="nextStep" class="step-button">다음</button>
+          </div>
+
+          <label class="test-mode-toggle">
+            <input type="checkbox" id="liveGroq" name="liveGroq" />
+            <span>Groq 실시간 응답 테스트</span>
+          </label>
+          <div id="progressPanel" class="progress-panel hidden" aria-live="polite">
+            <div class="progress-head">
+              <span class="progress-label-wrap">
+                <span class="progress-orbit" aria-hidden="true"></span>
+                <span id="progressLabel">일정 준비 중</span>
+              </span>
+              <strong id="progressPercent">0%</strong>
+            </div>
+            <div class="progress-track">
+              <div id="progressBar" class="progress-bar"></div>
+            </div>
+          </div>
+        </form>
+
+      </section>
+
+      <section id="status" class="status-panel hidden"></section>
+
+      <section id="result" class="result-grid hidden">
+        <section class="schedule-card">
+          <div class="card-head">
+            <div>
+              <span class="section-kicker">일정표</span>
+              <h2>장소별 일정과 다음 이동</h2>
+            </div>
+          </div>
+          <div id="scheduleBoard"></div>
+        </section>
+
+        <div class="map-card">
+          <div class="card-head">
+            <div>
+              <span class="section-kicker">동선 지도</span>
+              <h2 id="mapTitle">지도</h2>
+            </div>
+            <span class="badge">마우스휠 확대 가능</span>
+          </div>
+          <div class="map-layout">
+            <div class="map-wrap">
+              <div id="map"></div>
+              <div id="overlapPanel" class="overlap-panel hidden"></div>
+            </div>
+            <aside class="route-side">
+              <div id="selectedPlace" class="selected-place">마커 위에 마우스를 올리면 장소 정보가 표시됩니다.</div>
+              <div id="routeList"></div>
+            </aside>
+          </div>
+        </div>
+
+        <section class="plan-card">
+          <div class="card-head">
+            <div>
+              <span class="section-kicker">상세 일정</span>
+              <h2>한눈에 보는 여행 계획</h2>
+            </div>
+          </div>
+          <div id="planOutput" class="plan-output"></div>
+        </section>
+        <div class="result-footer">🙂 즐거운 여행되세요!</div>
+      </section>
+    </main>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="static/app.js"></script>
+  </body>
+</html>
