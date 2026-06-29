@@ -562,15 +562,14 @@ def generate_groq_plan_text(payload: dict[str, Any]) -> str:
                 "role": "system",
                 "content": (
                     "You are a Korean domestic travel planner. "
-                    "Return only one syntactically valid JSON object. "
-                    "Do not include markdown, comments, or prose outside JSON."
+                    "Return one JSON object only. "
+                    "No markdown, no code fences, no comments, and no prose outside the JSON object."
                 ),
             },
             {"role": "user", "content": build_groq_prompt(payload)},
         ],
         "temperature": 0.1,
         "max_tokens": max_tokens,
-        "response_format": {"type": "json_object"},
     }
 
     headers = {
@@ -1228,4 +1227,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
