@@ -358,6 +358,8 @@ async function requestPlan(payload) {
 function collectPayload() {
   const data = new FormData(form);
   const style = [...document.querySelectorAll('input[name="style"]:checked')].map((item) => item.value);
+  const params = new URLSearchParams(window.location.search);
+  const liveRequested = data.get("liveGroq") === "on" || params.get("live") === "1";
   return {
     region: data.get("region"),
     budget: data.get("budget"),
@@ -367,9 +369,8 @@ function collectPayload() {
     trip_days: Number(data.get("trip_days")) || undefined,
     companion: data.get("companion"),
     transport: data.get("transport"),
-    live_groq:
-      data.get("liveGroq") === "on" ||
-      new URLSearchParams(window.location.search).get("live") === "1",
+    live_groq: liveRequested,
+    confirm_groq: liveRequested && params.get("ai") === "groq",
     style,
   };
 }

@@ -36,11 +36,15 @@ def load_environment() -> None:
 
 load_environment()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
-GROQ_MODEL = os.getenv("GROQ_MODEL", GROQ_MODEL_DEFAULT).strip() or GROQ_MODEL_DEFAULT
+GROQ_MODEL_REQUESTED = os.getenv("GROQ_MODEL", GROQ_MODEL_DEFAULT).strip() or GROQ_MODEL_DEFAULT
+
+
+def is_gpt_oss_model(model_name: str) -> bool:
+    return model_name.lower().startswith("openai/gpt-oss")
 
 
 def active_model_name() -> str:
-    return GROQ_MODEL
+    return GROQ_MODEL_REQUESTED
 
 
 def to_int(value: Any, default: int = 0) -> int:
@@ -385,68 +389,35 @@ def build_groq_prompt(payload: dict[str, Any]) -> str:
     seed_text = ", ".join(seed_places[:14]) if seed_places else "Use well-known public landmarks, markets, parks, stations, beaches, museums, or streets."
 
     return f"""
-Create a practical Korean domestic travel itinerary in Korean.
-Return only one valid JSON object. No markdown. No prose outside JSON.
+Create a Korean domestic travel itinerary.
+Return ONLY valid JSON. Do not use markdown.
 
-Trip conditions:
-- Region: {payload.get("region")}
-- Start date: {payload.get("start_date") or "unknown"}
-- End date: {payload.get("end_date") or "unknown"}
-- Total trip days: {total_days}
-- Budget: {payload.get("budget")}
-- Companion: {payload.get("companion")}
-- Transport: {payload.get("transport")}
-- Style: {style_text}
-- Real place candidates you may use for this region: {seed_text}
+Conditions:
+- region: {payload.get("region")}
+- start_date: {payload.get("start_date") or "unknown"}
+- end_date: {payload.get("end_date") or "unknown"}
+- total_days: {total_days}
+- budget: {payload.get("budget")}
+- companion: {payload.get("companion")}
+- transport: {payload.get("transport")}
+- style: {style_text}
+- recommended_real_places: {seed_text}
 
 Rules:
-- Create route_points for every day from day 1 to day {total_days}.
-- Each day should have 3 to 5 ordered stops.
-- Use real place names in Korea and realistic addresses.
-- Do not invent fictional cafe, restaurant, hotel, or attraction names.
-- If you cannot verify a small business name, use a real district/market/street/landmark instead.
-- If you are unsure about coordinates, set lat and lng to null.
-- Use exact lodging names only when lodging is naturally needed. Format lodging place as 숙소[exact lodging name].
-- Make the trip flow naturally: first day starts near arrival, middle days can start/end at lodging, final day can end near departure.
-- For short segments, public_transport.instruction should recommend walking.
-- public_transport and taxi must include estimated minutes and KRW fare as integers.
+- Make route_points for every day 1..{total_days}.
+- Use 3 or 4 stops per day.
+- Use real Korean landmarks, streets, markets, stations, beaches, museums, or public places.
+- Do not invent fictional business names.
+- If coordinates are uncertain, use null for lat and lng.
+- If lodging is naturally needed, write place as 숙소[exact real lodging name].
+- summary and tip must be short Korean phrases.
+- Do not include transport_steps. The server will calculate movement data.
 
-Required JSON shape:
+JSON shape:
 {{
-  "trip_theme": "short Korean theme",
+  "trip_theme": "짧은 한국어 여행 주제",
   "route_points": [
-    {{
-      "day": 1,
-      "order": 1,
-      "time": "10:00",
-      "place": "place name",
-      "address": "address",
-      "lat": 37.0,
-      "lng": 127.0,
-      "category": "category",
-      "summary": "short Korean summary",
-      "tip": "short Korean tip"
-    }}
-  ],
-  "transport_steps": [
-    {{
-      "day": 1,
-      "from_order": 1,
-      "to_order": 2,
-      "from_place": "place name",
-      "to_place": "place name",
-      "public_transport": {{
-        "instruction": "bus/subway/walk instruction",
-        "duration_minutes": 20,
-        "fare_krw": 1550,
-        "note": "short note"
-      }},
-      "taxi": {{
-        "duration_minutes": 12,
-        "fare_krw": 8500,
-        "note": "short note"
-      }}
-    }}
+    {{"day": 1, "order": 1, "time": "10:00", "place": "장소명", "address": "주소", "lat": null, "lng": null, "category": "분류", "summary": "짧은 특징", "tip": "짧은 팁"}}
   ]
 }}
 """
@@ -550,27 +521,77 @@ def friendly_groq_response_error(response: requests.Response) -> str:
     return f"Groq API 오류({response.status_code}): {message}"
 
 
+def content_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, dict):
+                parts.append(str(part.get("text") or part.get("content") or ""))
+            else:
+                parts.append(str(part or ""))
+        return "\n".join(part for part in parts if part.strip()).strip()
+    return str(content or "").strip()
+
+
+def extract_groq_choice_text(data: dict[str, Any]) -> str:
+    choices = data.get("choices") if isinstance(data, dict) else None
+    if not choices:
+        raise RuntimeError("Groq가 일정 응답을 반환하지 않았습니다.")
+
+    finish_reasons: list[str] = []
+    refusals: list[str] = []
+    for choice in choices:
+        if not isinstance(choice, dict):
+            continue
+        finish = str(choice.get("finish_reason") or "").strip()
+        if finish:
+            finish_reasons.append(finish)
+
+        message = choice.get("message") if isinstance(choice.get("message"), dict) else {}
+        for key in ("content", "output_text", "reasoning_content", "reasoning"):
+            text = content_to_text(message.get(key))
+            if text:
+                return text
+
+        refusal = content_to_text(message.get("refusal"))
+        if refusal:
+            refusals.append(refusal)
+
+        choice_text = content_to_text(choice.get("text"))
+        if choice_text:
+            return choice_text
+
+    if refusals:
+        raise RuntimeError(refusals[0])
+    if "length" in finish_reasons:
+        raise RuntimeError("Groq 응답이 출력 길이 제한에 걸려 최종 일정이 비었습니다.")
+    reason_text = ", ".join(finish_reasons) or "unknown"
+    raise RuntimeError(f"Groq가 비어 있는 일정 응답을 반환했습니다. finish_reason={reason_text}")
+
+
 def generate_groq_plan_text(payload: dict[str, Any]) -> str:
     if not GROQ_API_KEY:
         raise RuntimeError("GROQ_API_KEY가 설정되어 있지 않습니다.")
 
-    max_tokens = min(3200, max(1800, 1200 + trip_day_count(payload) * 550))
+    max_tokens = min(6000, max(3000, 1800 + trip_day_count(payload) * 900))
+    instruction = (
+        "You are a Korean domestic travel planner. "
+        "Return one JSON object only. "
+        "No markdown, no code fences, no comments, and no prose outside the JSON object. "
+        "Never return an empty answer. If details are uncertain, use real well-known landmarks and set unknown coordinates to null. "
+        "The JSON must contain trip_theme and route_points."
+    )
     request_body = {
-        "model": GROQ_MODEL,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are a Korean domestic travel planner. "
-                    "Return one JSON object only. "
-                    "No markdown, no code fences, no comments, and no prose outside the JSON object."
-                ),
-            },
-            {"role": "user", "content": build_groq_prompt(payload)},
-        ],
+        "model": active_model_name(),
+        "messages": [{"role": "user", "content": f"{instruction}\n\n{build_groq_prompt(payload)}"}],
         "temperature": 0.1,
-        "max_tokens": max_tokens,
+        "max_completion_tokens": max_tokens,
     }
+    if is_gpt_oss_model(active_model_name()):
+        request_body["reasoning_effort"] = "low"
+        request_body["reasoning_format"] = "hidden"
 
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -595,19 +616,7 @@ def generate_groq_plan_text(payload: dict[str, Any]) -> str:
     except ValueError as exc:
         raise RuntimeError("Groq API 응답을 JSON으로 읽지 못했습니다.") from exc
 
-    choices = data.get("choices") if isinstance(data, dict) else None
-    if not choices:
-        raise RuntimeError("Groq가 일정 응답을 반환하지 않았습니다.")
-
-    message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
-    content = message.get("content", "")
-    if isinstance(content, list):
-        content = "\n".join(str(part.get("text", "")) for part in content if isinstance(part, dict))
-    content = str(content or "").strip()
-    if not content:
-        refusal = str(message.get("refusal", "")).strip()
-        raise RuntimeError(refusal or "Groq가 비어 있는 일정 응답을 반환했습니다.")
-    return content
+    return extract_groq_choice_text(data)
 
 
 def generate_plan_text(payload: dict[str, Any]) -> str:
@@ -1119,7 +1128,7 @@ def create_fallback_plan(payload: dict[str, Any], reason: Exception) -> dict[str
     }
 
 
-def create_local_plan(payload: dict[str, Any]) -> dict[str, Any]:
+def create_local_plan(payload: dict[str, Any], warning: str | None = None) -> dict[str, Any]:
     route_points = create_local_route_points(payload)
     transport_steps = normalize_transport_steps([], route_points, str(payload.get("transport", "")))
     return {
@@ -1132,7 +1141,7 @@ def create_local_plan(payload: dict[str, Any]) -> dict[str, Any]:
             "route_count": len(route_points),
             "transport_step_count": len(transport_steps),
             "local_mode": True,
-            "warning": "AI 호출 없이 빠른 로컬 일정으로 생성했습니다. 실시간 AI 검증은 테스트 체크박스를 켜고 실행하세요.",
+            "warning": warning or "AI 호출 없이 빠른 로컬 일정으로 생성했습니다. 외부 공유용 기본 모드입니다.",
         },
     }
 
@@ -1143,11 +1152,17 @@ def create_plan(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("여행 지역과 예산을 입력해주세요.")
 
     live_groq = bool(payload.get("live_groq"))
+    confirm_groq = bool(payload.get("confirm_groq"))
     if not live_groq:
         return create_local_plan(payload)
+    if not confirm_groq:
+        return create_local_plan(
+            payload,
+            "외부 공유 안정 모드입니다. API 한도 보호를 위해 실시간 GPT-OSS 호출은 잠겨 있고 로컬 일정으로 생성했습니다.",
+        )
 
     if not GROQ_API_KEY:
-        raise RuntimeError("GROQ_API_KEY가 설정되어 있지 않습니다.")
+        raise RuntimeError("배포 환경변수 GROQ_API_KEY가 설정되어 있지 않습니다. 이 오류는 API 호출 문제가 아니라 Render 설정 문제입니다.")
 
     try:
         parsed = generate_plan_data(payload)
@@ -1155,9 +1170,8 @@ def create_plan(payload: dict[str, Any]) -> dict[str, Any]:
         if not route_points:
             raise ValueError("AI가 방문지 목록을 만들지 못했습니다.")
     except Exception as exc:
-        if live_groq:
-            raise
-        return create_fallback_plan(payload, exc)
+        print(f"[groq-error] {type(exc).__name__}: {exc}", flush=True)
+        raise
 
     transport_steps = normalize_transport_steps(parsed.get("transport_steps"), route_points, str(payload.get("transport", "")))
     plan_markdown = build_plan_markdown(

@@ -22,3 +22,27 @@
 - 요청 본문에서 큰 JSON schema를 제거하고, 여행 기간에 따라 `max_tokens`를 동적으로 낮춰 분당 토큰 한도에 덜 걸리도록 조정함.
 - 프론트에서 이전 테스트 별칭인 `strict=1`을 제거하고 `live=1`만 Groq 실시간 호출 옵션으로 유지함.
 - 문법 검사와 로컬 빠른 생성 경로를 다시 통과함.
+
+## 2026-06-30 Groq 빈 응답 방어
+
+- `openai/gpt-oss-20b`가 reasoning 토큰을 쓰다가 최종 `message.content`를 비워 반환하는 경우를 줄이기 위해 `reasoning_effort=low`, `reasoning_format=hidden`, `max_completion_tokens`를 적용함.
+- GPT-OSS 모델 권장 방식에 맞춰 system 메시지를 제거하고 user 메시지 하나에 지시문과 여행 프롬프트를 함께 넣도록 변경함.
+- Groq 응답에서 `content`, `output_text`, `reasoning_content`, `reasoning`, `text`, `refusal`, `finish_reason`을 순서대로 확인하는 안전 추출 함수를 추가함.
+- `live=1` 실시간 경로에서도 Groq 빈 응답, JSON 파싱 실패, 출력 길이 제한 같은 생성 실패가 사용자 화면의 400 오류로 터지지 않고 fallback 일정으로 내려오도록 변경함.
+- 실제 Groq 호출 없이 빈 응답 예외를 시뮬레이션해 `provider=groq`, `fallback=True` 응답이 정상 생성되는 것을 확인함.
+
+## 2026-06-30 GPT-OSS 유지 및 실시간 오류 숨김 제거
+
+- 기본 Groq 모델을 다시 `openai/gpt-oss-20b`로 고정하고, reasoning 모델을 다른 모델로 자동 대체하지 않도록 복구함.
+- GPT-OSS가 생성해야 하는 JSON을 `trip_theme`와 `route_points` 중심으로 줄이고, 이동정보는 서버가 계산하도록 바꿔 응답 실패 가능성을 낮춤.
+- `reasoning_effort=low`, `reasoning_format=hidden`, `max_completion_tokens` 설정은 유지해 GPT-OSS의 빈 최종 응답 가능성을 낮춤.
+- `live=1` 실시간 호출에서 Groq 오류를 fallback으로 숨기지 않고 실제 오류로 드러나게 되돌림.
+- `py -m py_compile codex_test/server.py` 통과, 로컬 빠른 생성 정상 확인.
+
+## 2026-06-30 외부 공유 안정 모드
+
+- 외부 공유 링크에서 API 한도나 Groq 응답 불안정으로 오류가 뜨지 않도록 실시간 호출 잠금장치를 추가함.
+- 기본 링크와 `?live=1`은 Groq API를 호출하지 않고 로컬 빠른 일정으로 동작하도록 변경함.
+- 실제 GPT-OSS 호출은 `?live=1&ai=groq` 링크에서만 실행되도록 프론트 payload에 `confirm_groq`를 추가함.
+- 서버는 `live_groq=true`여도 `confirm_groq`가 없으면 `provider=local` 응답을 반환하고, API 호출을 하지 않음.
+- `?live=1` 페이지 응답 200, `live_groq=true/confirm_groq=false` API 응답 200 및 로컬 일정 생성을 확인함.
